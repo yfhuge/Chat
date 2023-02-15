@@ -27,22 +27,23 @@ vector<Group> g_currentUserGroupList;
 void showCurrentUserData();
 
 // 接收线程
-void readTaskHandler(int clientfd);
+void readTaskHandler(int fd);
 // 获取系统时间（聊天信息需要添加时间信息）
 string getCurrentTime();
 // 聊天页面程序
-void mainMenu();
+void mainMenu(int fd);
+// 是否显示登录页面
+bool isMainMenuing = false;
 
-void help(int fd, string str);
-void chat(int fd, string str);
-void addfriend(int fd, string str);
-void creategroup(int fd, string str);
-void addgroup(int fd, string str);
-void groupchat(int fd, string str);
-void loginout(int fd, string str);
-
-// 获取系统聊天时间
-string getCUrrentTime();
+void help(int fd = -1, string str = "");
+void chat(int fd = -1, string str = "");
+void addfriend(int fd = -1, string str = "");
+void creategroup(int fd = -1, string str = "");
+void addgroup(int fd = -1, string str = "");
+void groupchat(int fd = -1, string str = "");
+void loginout(int fd = -1, string str = "");
+void friendlist(int fd = -1, string str = "");
+void grouplist(int fd = -1, string str = "");
 
 // 系统支持的客户端命令列表
 unordered_map<string, string> commandMap = {
@@ -52,7 +53,9 @@ unordered_map<string, string> commandMap = {
     {"creategroup", "创建群组，格式:creategroup:groupname:groupdesc"},
     {"addgroup", "加入群组，格式:addgroup:groupid"},
     {"groupchat", "群聊，格式:groupchat:groupid:message"},
-    {"loginout", "注销，格式:loginout"}};
+    {"loginout", "注销，格式:loginout"},
+    {"friendlist", "查看好友列表，格式:friendlist"},
+    {"grouplist", "查看群组列表，格式:grouplist"}};
 
 // 注册系统支持的客户端命令处理
 unordered_map<string, function<void(int, string)>> commandHandlerMap = {
@@ -62,19 +65,9 @@ unordered_map<string, function<void(int, string)>> commandHandlerMap = {
     {"creategroup", creategroup},
     {"addgroup", addgroup},
     {"groupchat", groupchat},
-    {"loginout", loginout}};
-
-void loginout(int fd = -1, string str = "") {
-    json js;
-    js["msgid"] = LOGINOUT_MSG;
-    js["id"] = g_currentUser.getId();
-    string buffer = js.dump();
-
-    int len = send(fd, buffer.c_str(), strlen(buffer.c_str()) + 1, 0);
-    if (len == -1) {
-        cerr << "send loginout error -> " << buffer << endl;
-    }
-}
+    {"loginout", loginout},
+    {"friendlist", friendlist},
+    {"grouplist", grouplist}};
 
 // 聊天客户端程序实现，main线程用作发送线程，子线程用作接收线程
 int main(int argc, char *argv[])
@@ -161,20 +154,24 @@ int main(int argc, char *argv[])
                 else
                 {
                     json responsejs = json::parse(buf);
-                    // 登录失败
-                    if (responsejs["errno"].get<int>() != 0)
+                    if (responsejs["errno"].get<int>() != 0) // 登录失败
                     {
-                        cout << responsejs["errmsg"] << endl;
+                        cout << responsejs["errmsg"].get<string>() << endl;
                     }
                     else //  登录成功
                     {
+                        isMainMenuing = true;
+
                         g_currentUser.setId(id);
-                        g_currentUser.setName(responsejs["name"]);
+                        g_currentUser.setName(responsejs["name"].get<string>());
                         g_currentUser.setState("online");
 
                         // 记录该用户好友列表信息
                         if (responsejs.contains("friends"))
                         {
+                            // 初始化
+                            g_currentUserFriendList.clear();
+
                             vector<string> vec = responsejs["friends"];
                             for (string &str : vec)
                             {
@@ -189,6 +186,9 @@ int main(int argc, char *argv[])
                         // 记录该用户组群信息
                         if (responsejs.contains("groups"))
                         {
+                            // 初始化
+                            g_currentUserGroupList.clear();
+
                             vector<string> vec = responsejs["groups"];
                             for (string &str : vec)
                             {
@@ -217,22 +217,32 @@ int main(int argc, char *argv[])
                         showCurrentUserData();
 
                         // 显示当前登录成功用户的离线消息
-                        if (responsejs.contains("offlinemessgae"))
+                        if (responsejs.contains("offlinemsg"))
                         {
-                            vector<string> offmsgVec = responsejs["offlinemessage"];
+                            vector<string> offmsgVec = responsejs["offlinemsg"];
                             for (string &msgstr : offmsgVec)
                             {
                                 json offmsgjs = json::parse(msgstr);
-                                cout << offmsgjs["time"] << " [" << offmsgjs["id"] << "]" << offmsgjs["name"] << " said: " << offmsgjs["msg"].get<string>() << endl;
+                                if (offmsgjs["msgid"].get<int>() == ONE_CHAT_MSG)
+                                {
+                                    cout << offmsgjs["time"].get<string>() << " [" << offmsgjs["id"].get<int>() << "] " << offmsgjs["name"].get<string>() << " said: " << offmsgjs["msg"].get<string>() << endl;
+                                }
+                                else
+                                {
+                                    cout << "群消息[" << offmsgjs["groupid"].get<int>() << "] " << offmsgjs["time"].get<string>() << " [" << offmsgjs["id"].get<int>() << "] " << offmsgjs["name"].get<string>() << " said: " << offmsgjs["msg"].get<string>() << endl;
+                                }
                             }
                         }
-
-                        // 登录成功，启动接收线程负责接收数据
-                        std::thread readTask(readTaskHandler, clientfd);
-                        readTask.detach();
+                        static int readTaskNum = 0;
+                        // 登录成功，启动接收线程负责接收数据，只用启动一次
+                        if (readTaskNum == 0)
+                        {
+                            std::thread readTask(readTaskHandler, clientfd);
+                            readTask.detach();
+                        }
 
                         // 进入聊天主菜单界面
-                        mainMenu();
+                        mainMenu(clientfd);
                     }
                 }
             }
@@ -303,7 +313,7 @@ void showCurrentUserData()
     {
         for (User &user : g_currentUserFriendList)
         {
-            cout << user.getId() << " " << user.getName() << " " << user.getState() << endl;
+            cout << user.getId() << "       " << user.getName() << "        " << user.getState() << endl;
         }
     }
     cout << "----------------------group list----------------------------" << endl;
@@ -311,10 +321,10 @@ void showCurrentUserData()
     {
         for (Group &group : g_currentUserGroupList)
         {
-            cout << group.getId() << " " << group.getName() << " " << group.getDesc() << endl;
+            cout << group.getId() << "      " << group.getName() << "       " << group.getDesc() << endl;
             for (GroupUser &user : group.getUser())
             {
-                cout << user.getId() << " " << user.getName() << " " << user.getState() << " " << user.getRole() << endl;
+                cout << "   " << user.getId() << "  " << user.getName() << "    " << user.getState() << "   " << user.getRole() << endl;
             }
         }
     }
@@ -322,37 +332,79 @@ void showCurrentUserData()
 }
 
 // 接收线程
-void readTaskHandler(int clientfd) {
-    
+void readTaskHandler(int fd)
+{
+    while (1)
+    {
+        char buf[1024] = {0};
+        int len = recv(fd, buf, 1024, 0);
+        if (len == -1 || len == 0)
+        {
+            close(fd);
+            exit(-1);
+        }
+
+        // 接收ChatServer转发的数据，反序列化生成json数据对象
+        json js = json::parse(buf);
+        int msgtype = js["msgid"].get<int>();
+        if (msgtype == ONE_CHAT_MSG)
+        {
+            cout << js["time"].get<string>() << " [" << js["id"].get<int>() << "] " << js["name"].get<string>() << " said: " << js["msg"].get<string>() << endl;
+            continue;
+        }
+        if (msgtype == GROUP_CHAT_MSG)
+        {
+            cout << "群消息[" << js["groupid"].get<int>() << "] " << js["time"].get<string>() << " [" << js["id"].get<int>() << "] " << js["name"].get<string>() << " said: " << js["msg"].get<string>() << endl;
+            continue;
+        }
+        if (msgtype == CREATE_GROUP_MSG_ACK)
+        {
+            if (js["errno"].get<int>() == 0)
+            {
+                cout << "创建的群组号为：" << js["groupid"].get<int>() << "，不要忘记它!" << endl;
+            }
+            else
+            {
+                cout << "群组创建失败!" << endl;
+            }
+            continue;
+        }
+    }
 }
 
 // 主聊天页面
-void mainMenu(int fd) {
+void mainMenu(int fd)
+{
     help();
 
     char buf[1024] = {0};
-    while (1) {
+    while (isMainMenuing)
+    {
         cin.getline(buf, 1024);
         string commandBuf(buf);
         string command;
         int idx = commandBuf.find(":");
-        if (idx == -1) {
+        if (idx == -1)
+        {
             command = commandBuf;
-        } else {
+        }
+        else
+        {
             command = commandBuf.substr(0, idx);
             commandBuf = commandBuf.substr(idx + 1);
         }
 
         auto it = commandMap.find(command);
-        if (it == commandMap.end()) {
+        if (it == commandMap.end())
+        {
             cerr << "invaild input command!" << endl;
             continue;
         }
-        it->second(fd, commandBuf);
+        commandHandlerMap[command](fd, commandBuf);
     }
 }
 
-void help(int fd = -1, string str = "")
+void help(int fd, string str)
 {
     cout << "show command list" << endl;
     for (auto it : commandMap)
@@ -363,9 +415,11 @@ void help(int fd = -1, string str = "")
 }
 
 // friendid:msg
-void chat(int fd = -1, string str = "") {
+void chat(int fd, string str)
+{
     int idx = str.find(':');
-    if (idx == -1) {
+    if (idx == -1)
+    {
         cerr << "chat command invalid!" << endl;
         return;
     }
@@ -382,31 +436,36 @@ void chat(int fd = -1, string str = "") {
     string buffer = js.dump();
 
     int len = send(fd, buffer.c_str(), strlen(buffer.c_str()) + 1, 0);
-    if (len == -1) {
+    if (len == -1)
+    {
         cerr << "send chat msg error -> " << buffer << endl;
-    } 
-
+    }
 }
 
 // friendid
-void addfriend(int fd = -1, string str = "") {
+void addfriend(int fd, string str)
+{
     int friendid = atoi(str.c_str());
     json js;
     js["msgid"] = ADD_FRIEND_MSG;
     js["id"] = g_currentUser.getId();
     js["friendid"] = friendid;
     string buffer = js.dump();
+    cout << "addfriend  :   " << buffer << endl;
 
     int len = send(fd, buffer.c_str(), strlen(buffer.c_str()) + 1, 0);
-    if (len == -1) {
+    if (len == -1)
+    {
         cerr << "send add friend error -> " << buffer << endl;
     }
 }
 
 // groupname:groupdesc
-void creategroup(int fd = -1, string str = "") {
+void creategroup(int fd, string str)
+{
     int idx = str.find(":");
-    if (idx == -1) {
+    if (idx == -1)
+    {
         cerr << "creategroup command invaild!" << endl;
         return;
     }
@@ -420,55 +479,113 @@ void creategroup(int fd = -1, string str = "") {
     string buffer = js.dump();
 
     int len = send(fd, buffer.c_str(), strlen(buffer.c_str()) + 1, 0);
-    if (len == -1) {
+    if (len == -1)
+    {
         cerr << "send create group error -> " << buffer << endl;
     }
 }
 
 // groupid
-void addgroup(int fd = -1, string str = "") {
+void addgroup(int fd, string str)
+{
     int id = atoi(str.c_str());
     json js;
+    js["msgid"] = ADD_GROUP_MSG;
     js["id"] = g_currentUser.getId();
     js["groupid"] = id;
     string buffer = js.dump();
+    cout << "addgroup  :   " << buffer << endl;
 
     int len = send(fd, buffer.c_str(), strlen(buffer.c_str()) + 1, 0);
-    if (len == -1) {
+    if (len == -1)
+    {
         cerr << "send add group error -> " << buffer << endl;
     }
 }
 
 // groupid:msg
-void groupchat(int fd = -1, string str = "") {
+void groupchat(int fd, string str)
+{
     int idx = str.find(':');
-    if (idx == -1) {
+    if (idx == -1)
+    {
         cerr << "groupchat command invaild" << endl;
         return;
     }
-    
+
     int groupid = atoi(str.substr(0, idx).c_str());
     string msg = str.substr(idx + 1);
     json js;
     js["msgid"] = GROUP_CHAT_MSG;
     js["id"] = g_currentUser.getId();
     js["name"] = g_currentUser.getName();
-    js["time"] = getCUrrentTime();
+    js["time"] = getCurrentTime();
     js["groupid"] = groupid;
     js["msg"] = msg;
     string buffer = js.dump();
 
     int len = send(fd, buffer.c_str(), strlen(buffer.c_str()) + 1, 0);
-    if (len == -1) {
+    if (len == -1)
+    {
         cerr << "send group chat error -> " << buffer << endl;
     }
 }
 
+void loginout(int fd, string str)
+{
+    json js;
+    js["msgid"] = LOGINOUT_MSG;
+    js["id"] = g_currentUser.getId();
+    string buffer = js.dump();
+
+    int len = send(fd, buffer.c_str(), strlen(buffer.c_str()) + 1, 0);
+    if (len == -1)
+    {
+        cerr << "send loginout error -> " << buffer << endl;
+    }
+    else
+    {
+        isMainMenuing = false;
+    }
+}
+
+/*
+不是实时更新的，只是登录时的状态，后面看看能不能可以实现实时更新
+*/
+void friendlist(int fd, string str)
+{
+    cout << "friendlist" << endl;
+    for (auto &user : g_currentUserFriendList)
+    {
+        cout << user.getId() << " " << user.getName() << " " << user.getState() << endl;
+    }
+    cout << endl;
+}
+
+/*
+不是实时更新的，只是登录时的状态，后面看看能不能可以实现实时更新
+*/
+void grouplist(int fd, string str)
+{
+    cout << "groulist" << endl;
+    for (auto &group : g_currentUserGroupList)
+    {
+        cout << group.getId() << " " << group.getName() << " " << group.getDesc() << endl;
+        for (auto &user : group.getUser())
+        {
+            cout << user.getId() << " " << user.getName() << " " << user.getState() << " " << user.getRole() << endl;
+        }
+        cout << endl;
+    }
+    cout << endl;
+}
+
 // 获取系统时间
-string getCurrentTime() {
+string getCurrentTime()
+{
     auto tt = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-    struct tm* ptm = localtime(&tt);
+    struct tm *ptm = localtime(&tt);
     char data[60] = {0};
-    sprinf(data, "%d-%02d-%02d %02d:%02d:%02d", (int)ptm->tm_year + 1900, (int)ptm->tm_mon + 1, (int)ptm->tm_yday, (int)ptm->tm_hour, (int)ptm->tm_min, (int)ptm->tm_sec);
+    sprintf(data, "%d-%02d-%02d %02d:%02d:%02d", (int)ptm->tm_year + 1900, (int)ptm->tm_mon + 1, (int)ptm->tm_yday, (int)ptm->tm_hour, (int)ptm->tm_min, (int)ptm->tm_sec);
     return std::string(data);
 }

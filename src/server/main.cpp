@@ -4,7 +4,8 @@
 #include <signal.h>
 
 // 服务器ctrl c异常结束后，重置user的状态信息
-void sigHandle(int) {
+void sigHandle(int)
+{
     Chatservice::instance()->reset();
     exit(0);
 }

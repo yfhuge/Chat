@@ -6,9 +6,11 @@
 #include "groupuser.hpp"
 using namespace std;
 
-class Group {
+class Group
+{
 public:
-    Group(int id = -1, string name = "", string desc = "") {
+    Group(int id = -1, string name = "", string desc = "")
+    {
         this->id = id;
         this->name = name;
         this->desc = desc;

@@ -2,27 +2,33 @@
 #include "db.hpp"
 #include <iostream>
 
-void FriendModel::insert(int userid, int friendid) {
+void FriendModel::insert(int userid, int friendid)
+{
     char sql[1024] = {0};
     sprintf(sql, "insert into friend value(%d, %d);", userid, friendid);
 
     MySQL mysql;
-    if (mysql.connect()) {
+    if (mysql.connect())
+    {
         mysql.update(sql);
     }
 }
 
-vector<User> FriendModel::query(int userid) {
+vector<User> FriendModel::query(int userid)
+{
     char sql[1024] = {0};
     sprintf(sql, "select a.id, a.name, a.state from user a inner join friend b on a.id = b.friendid where b.userid = %d;", userid);
 
     MySQL mysql;
     vector<User> vec;
-    if (mysql.connect()) {
-        MYSQL_RES* res = mysql.query(sql);
-        if (res != nullptr) {
+    if (mysql.connect())
+    {
+        MYSQL_RES *res = mysql.query(sql);
+        if (res != nullptr)
+        {
             MYSQL_ROW row;
-            while ((row = mysql_fetch_row(res)) != nullptr) {
+            while ((row = mysql_fetch_row(res)) != nullptr)
+            {
                 User user;
                 user.setId(atoi(row[0]));
                 user.setName(row[1]);

@@ -11,8 +11,10 @@ bool UserModel::insert(User &user)
             user.getName().c_str(), user.getPwd().c_str(), user.getState().c_str());
 
     MySQL mysql;
-    if (mysql.connect()) {
-        if (mysql.update(sql)) {
+    if (mysql.connect())
+    {
+        if (mysql.update(sql))
+        {
             user.setId(mysql_insert_id(mysql.getMysql()));
             return true;
         }
@@ -21,16 +23,20 @@ bool UserModel::insert(User &user)
 }
 
 // 根据id获取对应用户的信息
-User UserModel::query(int id) {
+User UserModel::query(int id)
+{
     char sql[1024] = {0};
     sprintf(sql, "select * from user where id = %d;", id);
 
     MySQL mysql;
-    if (mysql.connect()) {
-        MYSQL_RES* res = mysql.query(sql);
-        if (res != nullptr) {
+    if (mysql.connect())
+    {
+        MYSQL_RES *res = mysql.query(sql);
+        if (res != nullptr)
+        {
             MYSQL_ROW row = mysql_fetch_row(res);
-            if (row != nullptr) {
+            if (row != nullptr)
+            {
                 User user;
                 user.setId(atoi(row[0]));
                 user.setName(row[1]);
@@ -45,25 +51,30 @@ User UserModel::query(int id) {
 }
 
 // 更新用户的状态信息
-bool UserModel::updateState(User user) {
+bool UserModel::updateState(User user)
+{
     char sql[1024] = {0};
     sprintf(sql, "update user set state = '%s' where id = %d;", user.getState().c_str(), user.getId());
 
     MySQL mysql;
-    if (mysql.connect()) {
-        if (mysql.update(sql)) {
+    if (mysql.connect())
+    {
+        if (mysql.update(sql))
+        {
             return true;
         }
-    }    
+    }
     return false;
 }
 
 // 重置用户的状态信息
-void UserModel::resetState() {
+void UserModel::resetState()
+{
     char sql[1024] = "update user set state = 'offline' where state = 'online';";
 
     MySQL mysql;
-    if (mysql.connect()) {
+    if (mysql.connect())
+    {
         mysql.update(sql);
     }
 }

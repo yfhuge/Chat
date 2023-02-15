@@ -6,7 +6,8 @@
 #include <muduo/base/Logging.h>
 using namespace std;
 
-class MySQL{
+class MySQL
+{
 public:
     // 初始化数据库
     MySQL();
@@ -17,11 +18,12 @@ public:
     // 更新操作
     bool update(string sql);
     // 查询操作
-    MYSQL_RES* query(string sql);
+    MYSQL_RES *query(string sql);
     // 获取连接
-    MYSQL* getMysql();
+    MYSQL *getMysql();
+
 private:
-    MYSQL* _mysql;
+    MYSQL *_mysql;
 };
 
 #endif

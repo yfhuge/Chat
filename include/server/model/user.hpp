@@ -4,9 +4,11 @@
 #include <string>
 using namespace std;
 
-class User{
+class User
+{
 public:
-    User(int id = -1, string name = "", string pwd = "", string state = "offline") {
+    User(int id = -1, string name = "", string pwd = "", string state = "offline")
+    {
         this->id = id;
         this->name = name;
         this->password = pwd;
@@ -22,7 +24,7 @@ public:
     string getName() { return this->name; }
     string getPwd() { return this->password; }
     string getState() { return this->state; }
-    
+
 private:
     int id;
     string name;

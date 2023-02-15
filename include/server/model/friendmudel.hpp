@@ -6,7 +6,8 @@
 using namespace std;
 
 // 用户好友表的操作
-class FriendModel{
+class FriendModel
+{
 public:
     // 添加好友
     void insert(int userid, int friendid);

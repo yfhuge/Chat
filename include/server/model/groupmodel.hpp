@@ -6,7 +6,8 @@
 #include <string>
 using namespace std;
 
-class GroupModel {
+class GroupModel
+{
 public:
     // 创建群组
     bool createGroup(Group &group);

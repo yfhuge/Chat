@@ -6,7 +6,8 @@
 using namespace std;
 
 // 离线消息操作类
-class OfflineMsgModel {
+class OfflineMsgModel
+{
 public:
     // 新增用户的离线消息
     void insert(int userid, string msg);

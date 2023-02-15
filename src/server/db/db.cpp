@@ -37,8 +37,10 @@ bool MySQL::connect()
 }
 
 // 更新操作
-bool MySQL::update(string sql) {
-    if (mysql_query(_mysql, sql.c_str())) {
+bool MySQL::update(string sql)
+{
+    if (mysql_query(_mysql, sql.c_str()))
+    {
         LOG_INFO << __FILE__ << ":" << __LINE__ << ":" << sql << "更新失败";
         return false;
     }
@@ -46,8 +48,10 @@ bool MySQL::update(string sql) {
 }
 
 // 查询操作
-MYSQL_RES* MySQL::query(string sql) {
-    if (mysql_query(_mysql, sql.c_str())) {
+MYSQL_RES *MySQL::query(string sql)
+{
+    if (mysql_query(_mysql, sql.c_str()))
+    {
         LOG_INFO << __FILE__ << ":" << __LINE__ << ":" << sql << "查询失败";
         return nullptr;
     }
@@ -55,6 +59,7 @@ MYSQL_RES* MySQL::query(string sql) {
 }
 
 // 获取连接
-MYSQL* MySQL::getMysql() {
+MYSQL *MySQL::getMysql()
+{
     return _mysql;
 }

@@ -19,10 +19,11 @@ using json = nlohmann::json;
 using MsgHandler = std::function<void(const TcpConnectionPtr &conn, json &js, Timestamp time)>;
 
 // 聊天服务器业务类
-class Chatservice{
+class Chatservice
+{
 public:
     // 获取单例对象的接口函数
-    static Chatservice* instance();
+    static Chatservice *instance();
     // 处理登录业务
     void login(const TcpConnectionPtr &conn, json &js, Timestamp time);
     // 处理注册业务
@@ -37,12 +38,15 @@ public:
     void addGroup(const TcpConnectionPtr &conn, json &js, Timestamp time);
     // 群聊天业务
     void groupChat(const TcpConnectionPtr &conn, json &js, Timestamp time);
+    // 处理注销业务
+    void loginout(const TcpConnectionPtr &conn, json &js, Timestamp time);
     // 异常结束，重置用户的状态信息
     void reset();
     // 获取消息对应的处理器
     MsgHandler getHandler(int msgid);
     // 客户端的异常退出
     void clientCloseExecption(const TcpConnectionPtr &conn);
+
 private:
     Chatservice();
 
