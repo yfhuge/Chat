@@ -1,0 +1,95 @@
+#include "groupmodel.hpp"
+#include "db.hpp"
+
+// 创建群组
+bool GroupModel::createGroup(Group &group) {
+    char sql[1024] = {0};
+    sprintf(sql, "insert into allGroup(groupname, groupdesc) values('%s', '%s');", group.getName().c_str(), group.getDesc().c_str());
+
+    MySQL mysql;
+    if (mysql.connect()) {
+        if (mysql.update(sql)) {
+            group.setId(mysql_insert_id(mysql.getMysql()));
+            return true;
+        }
+    }
+    return false;
+}
+
+// 加入群组
+void GroupModel::addGroup(int userid, int groupid, string role) {
+    char sql[1024] = {0};
+    sprintf(sql, "insert into groupuser values(%d, %d, '%s');", groupid, userid, role.c_str());
+
+    MySQL mysql;
+    if (mysql.connect()) {
+        mysql.update(sql);
+    }
+}
+
+// 查询用户所在的群组信息
+vector<Group> GroupModel::queryGroups(int userid) {
+    char sql[1024] = {0};
+    sprintf(sql, "select a.id, a.groupname, a.groupdesc from allgroup a inner join groupuser b on a.id = b.groupid where b.userid = %d;", userid);
+
+    vector<Group> vec;
+    MySQL mysql;
+    if (mysql.connect()) {
+        //  查询用户所在的群组信息（不包括群组的组员信息）
+        MYSQL_RES *res = mysql.query(sql);
+        if (res != nullptr) {
+            MYSQL_ROW row;
+            while ((row = mysql_fetch_row(res)) != nullptr) {
+                Group group;
+                group.setId(atoi(row[0]));
+                group.setName(row[1]);
+                group.setDesc(row[2]);
+                vec.push_back(group);
+            }
+            mysql_free_result(res);
+        }
+    }    
+
+    // 查询每个群组的组员信息
+    for (auto &group : vec) {
+        sprintf(sql, "select a.id, a.name, a.state, b.role from user a inner join groupuser b on a.id = b.userid where groupid = %d;", group.getId());
+
+        if (mysql.connect()) {
+            MYSQL_RES *res = mysql.query(sql);
+            if (res != nullptr) {
+                MYSQL_ROW row;
+                while ((row = mysql_fetch_row(res)) != nullptr) {
+                    GroupUser user;
+                    user.setId(atoi(row[0]));
+                    user.setName(row[1]);
+                    user.setState(row[2]);
+                    user.setRole(row[3]);
+                    group.getUser().push_back(user);
+                }
+                mysql_free_result(res);
+            }
+        }
+    }
+    
+    return vec;
+}   
+
+// 根据指定的groupid查询群组用户id列表，除userid自己，主要用户群聊业务给群组其它成员群发消息
+vector<int> GroupModel::queryGrouUsers(int userid, int groupid) {
+    char sql[1024] = {0};
+    sprintf(sql, "select userid from groupuser where groupid = %d and userid != %d;", groupid, userid);
+
+    vector<int> vec;
+    MySQL mysql;
+    if (mysql.connect()) {
+        MYSQL_RES *res = mysql.query(sql);
+        if (res != nullptr) {
+            MYSQL_ROW row;
+            while ((row = mysql_fetch_row(res)) != nullptr) {
+                vec.push_back(atoi(row[0]));
+            } 
+            mysql_free_result(res);
+        }
+    }
+    return vec;
+}

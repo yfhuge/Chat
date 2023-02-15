@@ -1,0 +1,47 @@
+[
+{
+  "directory": "/home/yf/Linux/chat/build/src/server",
+  "command": "/usr/bin/c++  -I/home/yf/Linux/chat/include -I/home/yf/Linux/chat/thirdparty -I/home/yf/Linux/chat/include/server -I/home/yf/Linux/chat/include/server/model -I/home/yf/Linux/chat/include/server/db -g -g -o CMakeFiles/ChatServer.dir/chatserver.cpp.o -c /home/yf/Linux/chat/src/server/chatserver.cpp",
+  "file": "/home/yf/Linux/chat/src/server/chatserver.cpp"
+},
+{
+  "directory": "/home/yf/Linux/chat/build/src/server",
+  "command": "/usr/bin/c++  -I/home/yf/Linux/chat/include -I/home/yf/Linux/chat/thirdparty -I/home/yf/Linux/chat/include/server -I/home/yf/Linux/chat/include/server/model -I/home/yf/Linux/chat/include/server/db -g -g -o CMakeFiles/ChatServer.dir/chatservice.cpp.o -c /home/yf/Linux/chat/src/server/chatservice.cpp",
+  "file": "/home/yf/Linux/chat/src/server/chatservice.cpp"
+},
+{
+  "directory": "/home/yf/Linux/chat/build/src/server",
+  "command": "/usr/bin/c++  -I/home/yf/Linux/chat/include -I/home/yf/Linux/chat/thirdparty -I/home/yf/Linux/chat/include/server -I/home/yf/Linux/chat/include/server/model -I/home/yf/Linux/chat/include/server/db -g -g -o CMakeFiles/ChatServer.dir/main.cpp.o -c /home/yf/Linux/chat/src/server/main.cpp",
+  "file": "/home/yf/Linux/chat/src/server/main.cpp"
+},
+{
+  "directory": "/home/yf/Linux/chat/build/src/server",
+  "command": "/usr/bin/c++  -I/home/yf/Linux/chat/include -I/home/yf/Linux/chat/thirdparty -I/home/yf/Linux/chat/include/server -I/home/yf/Linux/chat/include/server/model -I/home/yf/Linux/chat/include/server/db -g -g -o CMakeFiles/ChatServer.dir/db/db.cpp.o -c /home/yf/Linux/chat/src/server/db/db.cpp",
+  "file": "/home/yf/Linux/chat/src/server/db/db.cpp"
+},
+{
+  "directory": "/home/yf/Linux/chat/build/src/server",
+  "command": "/usr/bin/c++  -I/home/yf/Linux/chat/include -I/home/yf/Linux/chat/thirdparty -I/home/yf/Linux/chat/include/server -I/home/yf/Linux/chat/include/server/model -I/home/yf/Linux/chat/include/server/db -g -g -o CMakeFiles/ChatServer.dir/model/friendmodel.cpp.o -c /home/yf/Linux/chat/src/server/model/friendmodel.cpp",
+  "file": "/home/yf/Linux/chat/src/server/model/friendmodel.cpp"
+},
+{
+  "directory": "/home/yf/Linux/chat/build/src/server",
+  "command": "/usr/bin/c++  -I/home/yf/Linux/chat/include -I/home/yf/Linux/chat/thirdparty -I/home/yf/Linux/chat/include/server -I/home/yf/Linux/chat/include/server/model -I/home/yf/Linux/chat/include/server/db -g -g -o CMakeFiles/ChatServer.dir/model/groupmodel.cpp.o -c /home/yf/Linux/chat/src/server/model/groupmodel.cpp",
+  "file": "/home/yf/Linux/chat/src/server/model/groupmodel.cpp"
+},
+{
+  "directory": "/home/yf/Linux/chat/build/src/server",
+  "command": "/usr/bin/c++  -I/home/yf/Linux/chat/include -I/home/yf/Linux/chat/thirdparty -I/home/yf/Linux/chat/include/server -I/home/yf/Linux/chat/include/server/model -I/home/yf/Linux/chat/include/server/db -g -g -o CMakeFiles/ChatServer.dir/model/offlinemessagemodel.cpp.o -c /home/yf/Linux/chat/src/server/model/offlinemessagemodel.cpp",
+  "file": "/home/yf/Linux/chat/src/server/model/offlinemessagemodel.cpp"
+},
+{
+  "directory": "/home/yf/Linux/chat/build/src/server",
+  "command": "/usr/bin/c++  -I/home/yf/Linux/chat/include -I/home/yf/Linux/chat/thirdparty -I/home/yf/Linux/chat/include/server -I/home/yf/Linux/chat/include/server/model -I/home/yf/Linux/chat/include/server/db -g -g -o CMakeFiles/ChatServer.dir/model/usermodel.cpp.o -c /home/yf/Linux/chat/src/server/model/usermodel.cpp",
+  "file": "/home/yf/Linux/chat/src/server/model/usermodel.cpp"
+},
+{
+  "directory": "/home/yf/Linux/chat/build/src/client",
+  "command": "/usr/bin/c++  -I/home/yf/Linux/chat/include -I/home/yf/Linux/chat/thirdparty -I/home/yf/Linux/chat/include/server -I/home/yf/Linux/chat/include/server/model -I/home/yf/Linux/chat/include/server/db -g -g -o CMakeFiles/ChatClient.dir/main.cpp.o -c /home/yf/Linux/chat/src/client/main.cpp",
+  "file": "/home/yf/Linux/chat/src/client/main.cpp"
+}
+]
