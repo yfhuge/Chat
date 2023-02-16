@@ -10,12 +10,21 @@ void sigHandle(int)
     exit(0);
 }
 
-int main()
+int main(int argc, char* argv[])
 {
+    if (argc != 3)
+    {
+        cerr << "input invaild, example ./CHatServer 127.0.0.1 6000" << endl;
+        exit(0);
+    }
+
+    string ip = argv[1];
+    int port = atoi(argv[2]);
+
     signal(SIGINT, sigHandle);
 
     EventLoop loop;
-    InetAddress addr("127.0.0.1", 6000);
+    InetAddress addr(ip, port);
     ChatServer server(&loop, addr, "ChatServe");
 
     server.start();
