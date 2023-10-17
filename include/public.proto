@@ -1,0 +1,142 @@
+syntax = "proto3";
+
+package fixbuf;
+
+enum  MsgType
+{
+    LOGIN_MSG = 0; // 登录消息
+    LOGIN_MSG_ACK = 1;  // 登录响应消息
+    REGISTER_MSG = 2;   // 注册消息
+    REGISTER_MSG_ACK = 3;   // 注册响应消息
+    ADD_FRIEND_MSG = 4;     // 新增好友
+    ADD_FRIEND_MSG_ACK = 5; // 新增好友响应消息
+    CREATE_GROUP_MSG = 6;   // 创建群组消息
+    CREATE_GROUP_MSG_ACK = 7;   // 创建群组响应消息
+    ADD_GROUP_MSG = 8;  // 加入群组消息
+    ADD_GROUP_MSG_ACK = 9;  // 加入群组响应消息
+    ONE_CHAT = 10;  // 一对一聊天
+    GROUP_CHAT = 11;    // 群组聊天
+    LOGOUT_MSG = 12;    // 注销消息
+    LIST_MSG = 13;  // 查看用户的网盘文件消息
+    LIST_MSG_ACK = 14;  // 查看用户的网盘文件响应消息
+    DELETEFILE_MSG = 15;    // 删除用户的网盘文件消息
+    DELETEFILE_MSG_ACK = 16;    // 删除用户的网盘文件响应消息
+    DOWNLOAD_MSG = 17;  // 下载网盘文件消息
+    DOWNLOAD_MSG_ACK = 18;  // 下载网盘文件响应消息
+    UPLOAD_MSG = 19;    // 上传网盘文件消息
+    UPLOAD_MSG_ACK = 20;    // 下载网盘文件响应消息
+};
+
+// 错误信息
+message ErrorMsg
+{
+    int32 errcode = 1;  // 错误编号
+    bytes errmsg = 2;   // 错误信息或返回信息
+}
+
+// 发送和接收的消息
+message Info
+{
+    MsgType type = 1;   // 消息类型
+    bytes info = 2; // 消息的内容
+}
+
+// 用户
+message User
+{
+    int32 id = 1;   // 用户id
+    bytes name = 2; // 用户名
+    bytes password = 3; // 用户密码
+    bool state = 4; // 用户的状态
+}
+
+// 好友
+message Friend
+{
+    int32 userid = 1;   // 用户id
+    int32 friendid = 2; // 增加的好友的id
+}
+
+// 群聊用户
+message GroupUser
+{
+    User user = 1;  // 群聊用户信息
+    bytes role = 2; // 用户在群聊中的角色
+}
+
+// 群聊
+message Group
+{
+    int32 id = 1;   // 群聊id
+    bytes name = 2; // 群聊名称
+    bytes desc = 3; // 群聊表述
+    repeated GroupUser groupusers = 4; // 群聊成员
+}
+
+// 创建群聊
+message CreateGroup 
+{
+    int32 userid = 1;   // 创建群聊的用户的id
+    Group group = 2;    // 创建群聊的信息
+}
+
+// 加入群聊
+message AddGroup 
+{
+    int32 userid = 1;   // 加入群聊的用户id
+    int32 groupid = 2;  // 所加入的群聊id
+}
+
+// 用户消息
+message ToUserMsg
+{
+    int32 userid = 1;   // 发送消息的用户id
+    bytes username = 2; // 发送消息的用户名
+    int32 touserid = 3; // 发送到的用户id
+    bytes sendtime = 4; // 发送消息的时间
+    bytes msg = 5;  // 发送的内容
+}
+
+// 接收信息
+message FromMsg 
+{
+    int32 fromid = 1;   // 接收发送消息的id
+    bytes fromname = 2; //  接收发送消息的名称
+    bytes sendtime = 3; // 发送消息的时间
+    bytes msg = 4;  // 接收的信息
+}
+
+// 群聊消息
+message GroupMsg 
+{
+    int32 userid = 1;   // 群成员id
+    bytes username = 2; // 群成员名称
+    int32 groupid = 3;  // 群聊id 
+    bytes sendtime = 4; // 发送消息的时间
+    bytes msg = 5;  // 发送的内容
+}
+
+// 登录后消息显示
+message LoginMsg 
+{
+    User user = 1;  // 用户信息
+    repeated bytes recvmsg = 2;   // 接收离线消息
+    repeated User friendlist = 3;   // 好友列表
+    repeated Group grouplist = 4;   // 群组列表 
+}
+
+// 文件列表信息
+message FileList
+{
+    uint32 userid = 1;  // 用户id
+    repeated bytes filelist = 2;    // 文件名列表
+}
+
+// 文件信息
+message FileTrans
+{
+    bytes ip = 1;   // 文件服务器的IP
+    uint32 port = 2;    // 文件服务器的端口
+    bytes filename = 3; // 发送的文件名 
+    bytes newfilename = 4;  // 新存的文件名
+}

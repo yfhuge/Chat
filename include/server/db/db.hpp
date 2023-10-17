@@ -14,16 +14,20 @@ public:
     // 关闭数据库
     ~MySQL();
     // 连接数据库
-    bool connect();
+    bool Connect(string host, string user, string pwd, string dbname, unsigned short port);
     // 更新操作
-    bool update(string sql);
+    bool Update(string sql);
     // 查询操作
-    MYSQL_RES *query(string sql);
+    MYSQL_RES *Query(string sql);
     // 获取连接
-    MYSQL *getMysql();
-
+    MYSQL *GetMysql();
+    // 重置_alivetime;
+    void ResetAliveTime();
+    // 返回_alivetime
+    clock_t GetAliveTime();
 private:
     MYSQL *_mysql;
+    clock_t _alivetime; // 记录空闲状态后的存活时间
 };
 
 #endif

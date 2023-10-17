@@ -1,10 +1,5 @@
 #include "db.hpp"
 
-static string host = "127.0.0.1";
-static string user = "root";
-static string passwd = "123456";
-static string dbname = "chat";
-
 // 初始化数据库
 MySQL::MySQL()
 {
@@ -21,10 +16,10 @@ MySQL::~MySQL()
 }
 
 // 连接数据库
-bool MySQL::connect()
+bool MySQL::Connect(string host, string user, string pwd, string dbname, unsigned short port)
 {
-    MYSQL *ret = mysql_real_connect(_mysql, host.c_str(), user.c_str(), passwd.c_str(),
-                                    dbname.c_str(), 3306, nullptr, 0);
+    MYSQL *ret = mysql_real_connect(_mysql, host.c_str(), user.c_str(), pwd.c_str(),
+                                    dbname.c_str(), port, nullptr, 0);
     if (ret != nullptr)
     {
         // C和C++都是使用的ASCII，这里设置使用中文显示
@@ -32,34 +27,46 @@ bool MySQL::connect()
         LOG_INFO << "connect sql sucess!";
         return true;
     }
-    LOG_INFO << "connect sql fail!";
+    LOG_ERROR << "connect sql fail!";
     return false;
 }
 
 // 更新操作
-bool MySQL::update(string sql)
+bool MySQL::Update(string sql)
 {
     if (mysql_query(_mysql, sql.c_str()))
     {
-        LOG_INFO << __FILE__ << ":" << __LINE__ << ":" << sql << "更新失败";
+        LOG_ERROR << __FILE__ << ":" << __LINE__ << ":" << sql << "更新失败, error : " << mysql_error(_mysql);
         return false;
     }
     return true;
 }
 
 // 查询操作
-MYSQL_RES *MySQL::query(string sql)
+MYSQL_RES *MySQL::Query(string sql)
 {
     if (mysql_query(_mysql, sql.c_str()))
     {
-        LOG_INFO << __FILE__ << ":" << __LINE__ << ":" << sql << "查询失败";
+        LOG_ERROR << __FILE__ << ":" << __LINE__ << ":" << sql << "查询失败, error : " << mysql_error(_mysql);
         return nullptr;
     }
     return mysql_use_result(_mysql);
 }
 
 // 获取连接
-MYSQL *MySQL::getMysql()
+MYSQL *MySQL::GetMysql()
 {
     return _mysql;
+}
+
+// 重置_alivetime;
+void MySQL::ResetAliveTime()
+{
+    _alivetime = clock();
+}
+
+// 返回_alivetime
+clock_t MySQL::GetAliveTime()
+{
+    return _alivetime;
 }

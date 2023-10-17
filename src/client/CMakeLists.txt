@@ -1,8 +1,6 @@
-# 定义了一个SEC_LIST变量，包含了该目录下所有的源文件
 aux_source_directory(. SRC_LIST)
+aux_source_directory(../ PUB_LIST)
 
-# 指定生成可执行文件
-add_executable(ChatClient ${SRC_LIST})
+add_executable(ChatClient ${SRC_LIST} ${PUB_LIST})
 
-# 执行可执行文件链接是所需要依赖的库文件
-target_link_libraries(ChatClient pthread)
+target_link_libraries(ChatClient protobuf pthread)

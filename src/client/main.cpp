@@ -1,52 +1,72 @@
-#include "json.hpp"
-#include <iostream>
-#include <thread>
-#include <vector>
-#include <string>
-#include <ctime>
-#include <chrono>
+#include "public.pb.h"
 #include <unordered_map>
-#include <functional>
-using namespace std;
-using json = nlohmann::json;
-
-#include "user.hpp"
-#include "group.hpp"
-#include <arpa/inet.h>
-#include <time.h>
+#include <sys/socket.h>
 #include <unistd.h>
-#include "public.hpp"
+#include <string>
+#include <assert.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <vector>
+#include <unordered_map>
+#include <iostream>
+#include <functional>
+#include <thread>
+#include <semaphore.h>
+#include <atomic>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <sys/mman.h>
 
 // 记录当前系统登录的用户信息
-User g_currentUser;
-// 记录当前登录用户好友列表信息
-vector<User> g_currentUserFriendList;
-// 记录当前登录用户的群组列表信息
-vector<Group> g_currentUserGroupList;
-// 显示当前登录成功用户的基本信息
-void showCurrentUserData();
-
-// 接收线程
-void readTaskHandler(int fd);
-// 获取系统时间（聊天信息需要添加时间信息）
-string getCurrentTime();
-// 聊天页面程序
-void mainMenu(int fd);
-// 是否显示登录页面
+fixbuf::User m_currentUser;
+// 记录当前登录用户的好友消息
+std::vector<fixbuf::User> m_currentUserFriendList;
+// 记录当前登录用户的群组消息
+std::vector<fixbuf::Group> m_currentGroupList;
+// 是否显示登录界面
 bool isMainMenuing = false;
+// 读写之间的通信
+sem_t m_sem;
+// 登录的状态
+std::atomic_bool isLoginSuccess(false);
 
-void help(int fd = -1, string str = "");
-void chat(int fd = -1, string str = "");
-void addfriend(int fd = -1, string str = "");
-void creategroup(int fd = -1, string str = "");
-void addgroup(int fd = -1, string str = "");
-void groupchat(int fd = -1, string str = "");
-void loginout(int fd = -1, string str = "");
-void friendlist(int fd = -1, string str = "");
-void grouplist(int fd = -1, string str = "");
+// 显示当前登录成功用户的基本信息
+void ShowCurrentUserData();
+// 接收线程
+void ReadTaskHandler(int fd);
+// 获取系统时间（聊天信息需添加时间信息）
+std::string GetCurrentTime();
+// 聊天页面程序
+void MainMenu(int fd);
+// 注册的用户名
+char name[50] = {0};    
+// 注册的用户密码
+char pwd[50] = {0};
+// 文件已接收的长度和上次接收的长度
+off_t recvsize = 0, lastsize = 0;
+// 关于一次性接收n个字节的接收函数和发送函数
+int SendN(int fd, void *p, off_t bufLen);
+int RecvN(int fd, void *p, off_t bufLen);
+
+void help(int fd = -1, std::string str = "");
+void chat(int fd = -1, std::string str = "");
+void addfriend(int fd = -1, std::string str = "");
+void creategroup(int fd = -1, std::string str = "");
+void addgroup(int fd = -1, std::string str = "");
+void groupchat(int fd = -1, std::string str = "");
+void friendlist(int fd = -1, std::string str = "");
+void grouplist(int fd = -1, std::string str = "");
+void loginout(int fd = -1, std::string str = "");
+void ls(int fd, std::string str = "");
+void del(int fd, std::string str = "");
+void download(int fd, std::string str = "");
+void upload(int fd, std::string str = "");
+void login(std::string str = "");
+void reg(std::string str = "");
 
 // 系统支持的客户端命令列表
-unordered_map<string, string> commandMap = {
+std::unordered_map<std::string, std::string> commandMap = {
     {"help", "显示所有支持的命令，格式help"},
     {"chat", "一对一聊天，格式chat:friendid:message"},
     {"addfriend", "添加好友，格式:addfriend:friendid"},
@@ -55,10 +75,15 @@ unordered_map<string, string> commandMap = {
     {"groupchat", "群聊，格式:groupchat:groupid:message"},
     {"loginout", "注销，格式:loginout"},
     {"friendlist", "查看好友列表，格式:friendlist"},
-    {"grouplist", "查看群组列表，格式:grouplist"}};
+    {"grouplist", "查看群组列表，格式:grouplist"},
+    {"ls", "查看当前网盘的文件目录，格式:ls"},
+    {"del", "删除指定的网盘的文件，格式:del:filename"},
+    {"download", "下载网盘中指定的文件，格式:download:filename:newfilename"},
+    {"upload", "将本地文件上传到网盘中，格式:upload:filename"}
+};
 
 // 注册系统支持的客户端命令处理
-unordered_map<string, function<void(int, string)>> commandHandlerMap = {
+std::unordered_map<std::string, std::function<void(int, std::string)>> commandHandlerMap = {
     {"help", help},
     {"chat", chat},
     {"addfriend", addfriend},
@@ -67,272 +92,578 @@ unordered_map<string, function<void(int, string)>> commandHandlerMap = {
     {"groupchat", groupchat},
     {"loginout", loginout},
     {"friendlist", friendlist},
-    {"grouplist", grouplist}};
+    {"grouplist", grouplist},
+    {"ls", ls},
+    {"del", del},
+    {"download", download},
+    {"upload", upload}};
 
-// 聊天客户端程序实现，main线程用作发送线程，子线程用作接收线程
-int main(int argc, char *argv[])
+int main(int argc, char** argv)
 {
     if (argc < 3)
     {
-        cerr << "command invalid! example: ./ChatClient 127.0.0.1 6000" << endl;
+        std::cerr << "format:./ChatClient IP SERVERPORT" << std::endl;
         exit(-1);
     }
 
-    // 解析通过命令行参数传递的ip和端口
-    char *ip = argv[1];
-    uint16_t port = atoi(argv[2]);
+    std::string ip = argv[1];
+    int port = atoi(argv[2]);
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    assert(fd != -1);
 
-    // 创建client端的socket
-    int clientfd = socket(AF_INET, SOCK_STREAM, 0);
-    if (clientfd == -1)
+    struct sockaddr_in address;
+    bzero(&address, sizeof(address));
+    address.sin_family = AF_INET;
+    address.sin_port = htons(port);
+    address.sin_addr.s_addr = inet_addr(ip.c_str());
+    int ret = connect(fd, (struct sockaddr*)&address, sizeof(address));
+    if (ret == -1)
     {
-        cerr << "socket create error" << endl;
+        std::cerr << "connect error" << std::endl;
+        close(fd);
         exit(-1);
     }
 
-    // 填写client需要连接的server信息ip + port
-    sockaddr_in server;
-    memset(&server, 0, sizeof(sockaddr_in));
+    sem_init(&m_sem, 0, 0);
+    std::thread readTask(ReadTaskHandler, fd);
+    readTask.detach();
 
-    server.sin_family = AF_INET;
-    server.sin_port = htons(port);
-    server.sin_addr.s_addr = inet_addr(ip);
-
-    // client和server进行连接
-    if (connect(clientfd, (sockaddr *)&server, sizeof(sockaddr_in)) == -1)
-    {
-        cerr << "connect server error" << endl;
-        close(clientfd);
-        exit(-1);
-    }
-
-    // main线程用于接收用户输入，负责发送数据
     while (1)
     {
-        // 显示首页菜单 登录、注册、退出
-        cout << "=================" << endl;
-        cout << "1. login" << endl;
-        cout << "2. register" << endl;
-        cout << "3. quit" << endl;
-        cout << "=================" << endl;
-        cout << "choice:";
-        int choice = 0;
-        cin >> choice;
-        cin.get(); // 读掉缓冲区残留的回车
+        // 显示首页菜单 登录 注册 退出
+        std::cout << "===============" << std::endl;
+        std::cout << "1.  login" << std::endl;
+        std::cout << "2.  register" << std::endl;
+        std::cout << "3.  quit" << std::endl;
+        std::cout << "===============" << std::endl;
+        std::cout << "choice:";
+        int choice;
+        std::cin >> choice;
+        std::cin.get(); // 读取缓冲区残留的回车
 
         switch (choice)
         {
         case 1:
-        { // login业务
-            int id = 0;
-            char pwd[50] = {0};
-            cout << "userid:";
-            cin >> id;
-            cin.get(); // 读掉缓冲区残留的回车
-            cout << "userpassword:";
-            cin.getline(pwd, 50);
+        {
+            int id;
+            char pwd[20] = {0};
+            std::cout << "userid:";
+            std::cin >> id;
+            std::cin.get();
+            std::cout << "userpassword:";
+            std::cin.getline(pwd, 20);
 
-            json js;
-            js["msgid"] = LOGIN_MSG;
-            js["id"] = id;
-            js["password"] = pwd;
-            string request = js.dump();
-
-            int len = send(clientfd, request.c_str(), strlen(request.c_str()) + 1, 0);
+            fixbuf::Info info;
+            info.set_type(fixbuf::LOGIN_MSG);
+            fixbuf::User user;
+            user.set_id(id);
+            user.set_password(pwd);
+            std::string user_buf, info_buf;
+            if (!user.SerializeToString(&user_buf))
+            {       
+                std::cerr << "serialize failed" << std::endl;
+                break;
+            }
+            info.set_info(user_buf);
+            if (!info.SerializeToString(&info_buf))
+            {
+                std::cerr << "serialize failed" << std::endl;
+                break;
+            }
+            int len = send(fd, info_buf.c_str(), info_buf.size(), 0);
             if (len == -1)
             {
-                cerr << "send login msg errno:" << request << endl;
+                std::cerr << "send login msg errnor, connect:" << info_buf << std::endl; 
             }
-            else
+
+            // 等待子进程处理完登录的响应消息
+            sem_wait(&m_sem);
+
+            if (isLoginSuccess)
             {
-                char buf[1024] = {0};
-                len = recv(clientfd, buf, 1024, 0);
-                if (len == -1)
-                {
-                    cerr << "recv login response errno" << endl;
-                }
-                else
-                {
-                    json responsejs = json::parse(buf);
-                    if (responsejs["errno"].get<int>() != 0) // 登录失败
-                    {
-                        cout << responsejs["errmsg"].get<string>() << endl;
-                    }
-                    else //  登录成功
-                    {
-                        isMainMenuing = true;
-
-                        g_currentUser.setId(id);
-                        g_currentUser.setName(responsejs["name"].get<string>());
-                        g_currentUser.setState("online");
-
-                        // 记录该用户好友列表信息
-                        if (responsejs.contains("friends"))
-                        {
-                            // 初始化
-                            g_currentUserFriendList.clear();
-
-                            vector<string> vec = responsejs["friends"];
-                            for (string &str : vec)
-                            {
-                                json friendjs = json::parse(str);
-                                User user;
-                                user.setId(friendjs["id"].get<int>());
-                                user.setName(friendjs["name"]);
-                                user.setState(friendjs["state"]);
-                                g_currentUserFriendList.push_back(user);
-                            }
-                        }
-                        // 记录该用户组群信息
-                        if (responsejs.contains("groups"))
-                        {
-                            // 初始化
-                            g_currentUserGroupList.clear();
-
-                            vector<string> vec = responsejs["groups"];
-                            for (string &str : vec)
-                            {
-                                json groupjs = json::parse(str);
-
-                                Group group;
-                                group.setId(groupjs["id"].get<int>());
-                                group.setName(groupjs["groupname"]);
-                                group.setDesc(groupjs["groupdesc"]);
-
-                                vector<string> vec2 = groupjs["users"];
-                                for (string &userstr : vec2)
-                                {
-                                    GroupUser user;
-                                    json groupuserjs = json::parse(userstr);
-                                    user.setId(groupuserjs["id"].get<int>());
-                                    user.setName(groupuserjs["name"]);
-                                    user.setState(groupuserjs["state"]);
-                                    user.setRole(groupuserjs["role"]);
-                                    group.getUser().push_back(user);
-                                }
-                                g_currentUserGroupList.push_back(group);
-                            }
-                        }
-                        // 显示当前登录成功用户的基本信息
-                        showCurrentUserData();
-
-                        // 显示当前登录成功用户的离线消息
-                        if (responsejs.contains("offlinemsg"))
-                        {
-                            vector<string> offmsgVec = responsejs["offlinemsg"];
-                            for (string &msgstr : offmsgVec)
-                            {
-                                json offmsgjs = json::parse(msgstr);
-                                if (offmsgjs["msgid"].get<int>() == ONE_CHAT_MSG)
-                                {
-                                    cout << offmsgjs["time"].get<string>() << " [" << offmsgjs["id"].get<int>() << "] " << offmsgjs["name"].get<string>() << " said: " << offmsgjs["msg"].get<string>() << endl;
-                                }
-                                else
-                                {
-                                    cout << "群消息[" << offmsgjs["groupid"].get<int>() << "] " << offmsgjs["time"].get<string>() << " [" << offmsgjs["id"].get<int>() << "] " << offmsgjs["name"].get<string>() << " said: " << offmsgjs["msg"].get<string>() << endl;
-                                }
-                            }
-                        }
-                        static int readTaskNum = 0;
-                        // 登录成功，启动接收线程负责接收数据，只用启动一次
-                        if (readTaskNum == 0)
-                        {
-                            std::thread readTask(readTaskHandler, clientfd);
-                            readTask.detach();
-                        }
-
-                        // 进入聊天主菜单界面
-                        mainMenu(clientfd);
-                    }
-                }
+                isMainMenuing = true;
+                MainMenu(fd);
             }
         }
         break;
         case 2:
-        { // register业务
-            char name[50], pwd[50];
-            cout << "please input name:";
-            cin.getline(name, 50);
-            cout << "please input password:";
-            cin.getline(pwd, 50);
+        {
 
-            json js;
-            js["msgid"] = REG_MSG;
-            js["name"] = name;
-            js["password"] = pwd;
-            string respest = js.dump();
+            std::cout << "please input name:";
+            std::cin.getline(name, 50);
+            std::cout << "please input password:";
+            std::cin.getline(pwd, 50);
 
-            int len = send(clientfd, respest.c_str(), strlen(respest.c_str()) + 1, 0);
+            fixbuf::Info info;
+            fixbuf::User user;
+            user.set_name(name);
+            user.set_password(pwd);
+            std::string user_buf, info_buf;
+            if (!user.SerializeToString(&user_buf))
+            {
+                std::cerr << "serialize failed" << std::endl;
+                break;
+            }
+            info.set_type(fixbuf::REGISTER_MSG);
+            info.set_info(user_buf);
+            if (!info.SerializeToString(&info_buf))
+            {
+                std::cerr << "serialize failed" << std::endl;
+                break;
+            }
+            int len = send(fd, info_buf.c_str(), info_buf.size(), 0);
             if (len == -1)
             {
-                cerr << "send register msg errno" << endl;
+                std::cerr << "send register msg error, context:" << info_buf << std::endl;
             }
-            else
-            {
-                char buf[1024] = {0};
-                len = recv(clientfd, buf, 1024, 0);
-                if (len == -1)
-                {
-                    cerr << "recv register response errno" << endl;
-                }
-                else
-                {
-                    json responsejs = json::parse(buf);
 
-                    if (responsejs["errno"].get<int>())
-                    {
-                        cout << name << " is already exist, register errno!" << endl;
-                    }
-                    else
-                    {
-                        cout << name << " register success, userid is " << responsejs["id"] << ", do not forget it!" << endl;
-                    }
-                }
-            }
+            sem_wait(&m_sem);
         }
         break;
-        case 3: // 退出
-            close(clientfd);
+        case 3:
+            close(fd);
             exit(0);
         default:
-            cerr << "invalid input!" << endl;
+            std::cerr << "invalid input!" << std::endl;
             break;
         }
     }
 
+    close(fd);
     return 0;
 }
 
-// 显示当前登录成功用户的基本信息
-void showCurrentUserData()
+
+void help(int fd, std::string str)
 {
-    cout << "======================login user============================" << endl;
-    cout << "current login user => id:" << g_currentUser.getId() << " name:" << g_currentUser.getName() << endl;
-    cout << "----------------------friend list---------------------------" << endl;
-    if (!g_currentUserFriendList.empty())
+    std::cout << std::endl << "show command list" << std::endl;
+    for (auto it : commandMap)
     {
-        for (User &user : g_currentUserFriendList)
+        std::cout << it.first << "  :  " << it.second << std::endl;
+    }
+    std::cout << std::endl;
+}
+
+void chat(int fd, std::string str)
+{
+    int idx = str.find(':');
+    if (idx == -1)
+    {
+        std::cerr << "chat command invalid!" << std::endl;
+        return;
+    }
+
+    int id = atoi(str.substr(0, idx).c_str());
+    std::string msg = str.substr(idx + 1);
+    fixbuf::ToUserMsg send_msg;
+    send_msg.set_userid(m_currentUser.id());
+    send_msg.set_touserid(id);
+    send_msg.set_sendtime(GetCurrentTime());
+    send_msg.set_username(m_currentUser.name());
+    send_msg.set_msg(msg);
+    std::string msg_buf, info_buf;
+    if (!send_msg.SerializeToString(&msg_buf))
+    {
+        std::cerr << "serialize error!" << std::endl;
+        return;
+    }
+    fixbuf::Info info;
+    info.set_type(fixbuf::ONE_CHAT);
+    info.set_info(msg_buf);
+    if (!info.SerializeToString(&info_buf))
+    {
+        std::cerr << "serialize error!" << std::endl;
+        return;
+    }
+
+    int len = send(fd, info_buf.c_str(), info_buf.size(), 0);
+    if (len == -1)
+    {
+        std::cerr << "send msg error, msg : " << info_buf << std::endl;
+    }
+}
+
+void addfriend(int fd, std::string str)
+{
+    int id = atoi(str.c_str());
+    fixbuf::Info info;
+    info.set_type(fixbuf::ADD_FRIEND_MSG);
+    fixbuf::Friend addfriend;
+    addfriend.set_friendid(id);
+    addfriend.set_userid(m_currentUser.id());
+    std::string addfriend_buf, info_buf;
+    if (!addfriend.SerializeToString(&addfriend_buf))
+    {
+        std::cerr << "serialize error!" << std::endl;
+        return;
+    }
+    info.set_info(addfriend_buf);
+    if (!info.SerializeToString(&info_buf))
+    {
+        std::cerr << "serialize error!" << std::endl;
+        return;
+    }
+    
+    int len = send(fd, info_buf.c_str(), info_buf.size(), 0);
+    if (len == -1)
+    {
+        std::cerr << "send msg error, msg : " << info_buf.c_str() << std::endl;
+    }
+}
+
+void creategroup(int fd, std::string str)
+{
+    int idx = str.find(':');
+    if (idx == -1)
+    {
+        std::cerr << "command creategroup invaild!" << std::endl;
+        return;
+    }
+    std::string groupname = str.substr(0, idx);
+    std::string groupdesc = str.substr(idx + 1);
+    std::string group_buf, info_buf;
+
+    fixbuf::CreateGroup crtgroup;
+    crtgroup.set_userid(m_currentUser.id());
+    auto *group = crtgroup.mutable_group();
+    group->set_name(groupname);
+    group->set_desc(groupdesc);
+    if (!crtgroup.SerializeToString(&group_buf))
+    {
+        std::cerr << "serialize error" << std::endl;
+        return;
+    }
+    fixbuf::Info info;
+    info.set_type(fixbuf::CREATE_GROUP_MSG);
+    info.set_info(group_buf);
+    if (!info.SerializeToString(&info_buf))
+    {
+        std::cerr << "serialize error" << std::endl;
+        return;
+    }
+
+    int len = send(fd, info_buf.c_str(), info_buf.size(), 0);
+    if (len == -1)
+    {
+        std::cerr << "send msg error, msg : " << info_buf << std::endl;
+    }
+}
+
+void addgroup(int fd, std::string str)
+{
+    int id = atoi(str.c_str());
+    fixbuf::AddGroup addgroupmsg;
+    addgroupmsg.set_userid(m_currentUser.id());
+    addgroupmsg.set_groupid(id);
+    std::string addgroup_buf, info_buf;
+    if (!addgroupmsg.SerializeToString(&addgroup_buf))
+    {
+        std::cerr << "serialize error" << std::endl;
+        return;
+    }
+    fixbuf::Info info;
+    info.set_type(fixbuf::ADD_GROUP_MSG);
+    info.set_info(addgroup_buf);
+    if (!info.SerializeToString(&info_buf))
+    {
+        std::cerr << "serialize error" << std::endl;
+        return;
+    }
+
+    int len = send(fd, info_buf.c_str(), info_buf.size(), 0);
+    if (len == -1)
+    {
+        std::cerr << "send msg error, msg : " << info_buf << std::endl;
+    }
+}
+
+void groupchat(int fd, std::string str)
+{
+    int idx = str.find(':');
+    if (idx == -1)
+    {
+        std::cerr << "command groupchat invaild!" << std::endl;
+        return;
+    }
+    int id = atoi(str.substr(0, idx).c_str());
+    std::string msg = str.substr(idx + 1);
+
+    fixbuf::GroupMsg groupmsg;
+    groupmsg.set_userid(m_currentUser.id());
+    groupmsg.set_groupid(id);
+    groupmsg.set_msg(msg);
+    groupmsg.set_sendtime(GetCurrentTime());
+    groupmsg.set_username(m_currentUser.name());
+    std::string groupmsg_buf, info_buf;
+    if (!groupmsg.SerializeToString(&groupmsg_buf))
+    {
+        std::cerr << "serialize error!" << std::endl;
+        return;
+    }
+    fixbuf::Info info;
+    info.set_type(fixbuf::GROUP_CHAT);
+    info.set_info(groupmsg_buf);
+    if (!info.SerializeToString(&info_buf))
+    {
+        std::cerr << "serialize error!" << std::endl;
+        return;
+    }
+
+    int len = send(fd, info_buf.c_str(), info_buf.size(), 0);
+    if (len == -1)
+    {
+        std::cerr << "send msg error, msg : " << info_buf << std::endl;
+    }
+}
+
+void friendlist(int fd, std::string str)
+{
+    std::cout << "friendlist" << std::endl;
+    for (auto &user : m_currentUserFriendList)
+    {
+        std::cout << user.id() << " " << user.name() << " " << (user.state()?"online":"offline") << std::endl;
+    }
+    std::cout << std::endl;
+}
+
+void grouplist(int fd, std::string str)
+{
+    std::cout << "grouplist" << std::endl;
+    for (auto &group : m_currentGroupList)
+    {
+        std::cout << group.id() << " " << group.name() << " " << group.desc() << std::endl;
+        auto *users = group.mutable_groupusers();
+        for (int i = 0; i < users->size(); ++ i)
         {
-            cout << user.getId() << "       " << user.getName() << "        " << user.getState() << endl;
+            std::cout << "\r" << users->at(i).user().id() << " " << users->at(i).user().name() << " " << (users->at(i).user().state()?"online":"offline") << " " << users->at(i).role() << std::endl; 
+        }
+        std::cout << std::endl;
+    }
+}
+
+void loginout(int fd, std::string str)
+{
+    fixbuf::Info info;
+    info.set_type(fixbuf::LOGOUT_MSG);
+    info.set_info(std::to_string(m_currentUser.id()));
+    std::string info_buf;
+    if (!info.SerializeToString(&info_buf))
+    {
+        std::cerr << "serialize error!" << std::endl;
+        return;
+    }
+
+    int len = send(fd, info_buf.c_str(), info_buf.size(), 0);
+    if (len == -1)
+    {
+        std::cerr << "send msg error, msg : " << info_buf << std::endl;
+    }
+    else 
+    {
+        isMainMenuing = false;
+    }
+}
+
+void ls(int fd, std::string str)
+{
+    fixbuf::Info info;
+    info.set_type(fixbuf::LIST_MSG);
+    info.set_info(std::to_string(m_currentUser.id()));
+    std::string info_buf;
+    if (!info.SerializeToString(&info_buf))
+    {
+        std::cerr << "serialize error!" << std::endl;
+        return;
+    }
+
+    int len = send(fd, info_buf.c_str(), info_buf.size(), 0);
+    if (len == -1)
+    {
+        std::cerr << "send msg error, msg : " << info_buf << std::endl;
+    }
+}
+
+void del(int fd, std::string str)
+{
+    fixbuf::FileList filelist;
+    filelist.set_userid(m_currentUser.id());
+    filelist.add_filelist(str);
+    std::string filelist_buf, info_buf;
+    if (!filelist.SerializeToString(&filelist_buf))
+    {
+        std::cerr << "serialize error" << std::endl;
+        return;
+    }
+    fixbuf::Info info;
+    info.set_type(fixbuf::DELETEFILE_MSG);
+    info.set_info(filelist_buf);
+    if (!info.SerializeToString(&info_buf))
+    {
+        std::cerr << "serialize error!" << std::endl;
+        return;
+    }
+
+    int len = send(fd, info_buf.c_str(), info_buf.size(), 0);
+    if (len == -1)
+    {
+        std::cerr << "send msg error, msg : " << info_buf << std::endl;
+    }
+}
+
+void download(int fd, std::string str)
+{
+    int idx = str.find(':');
+    if (idx == -1)
+    {
+        std::cerr << "command groupchat invaild!" << std::endl;
+        return;
+    }
+    fixbuf::Info info;
+    info.set_type(fixbuf::DOWNLOAD_MSG);
+    info.set_info(str);
+    std::string info_buf;
+    if (!info.SerializeToString(&info_buf))
+    {
+        std::cerr << "serialize error" << std::endl;
+        return;
+    }
+
+    int len = send(fd, info_buf.c_str(), info_buf.size(), 0);
+    if (len == -1)
+    {
+        std::cerr << "send msg error, msg : " << info_buf << std::endl;
+    }
+}
+
+void upload(int fd, std::string str)
+{
+    fixbuf::Info info;
+    info.set_type(fixbuf::UPLOAD_MSG);
+    info.set_info(str);
+    std::string info_buf;
+    if (!info.SerializeToString(&info_buf))
+    {
+        std::cerr << "serialize error" << std::endl;
+        return;
+    }
+
+    int len = send(fd, info_buf.c_str(), info_buf.size(), 0);
+    if (len == -1)
+    {
+        std::cerr << "send msg error, msg : " << info_buf << std::endl;
+    }
+}
+
+void login(std::string str)
+{
+    fixbuf::ErrorMsg errmsg;
+    if (!errmsg.ParseFromString(str))
+    {
+        std::cerr << "parse error, context:" << str << std::endl;
+        return;
+    }
+    if (errmsg.errcode())
+    {
+        // 登录失败
+        std::cerr << errmsg.errmsg() << std::endl;
+        isLoginSuccess = false;
+    }
+    else 
+    {
+        // 登录成功
+        fixbuf::LoginMsg loginmsg;
+        if (!loginmsg.ParseFromString(errmsg.errmsg()))
+        {
+            std::cerr << "parse error, context:" << errmsg.errmsg();
+            return;
+        }
+
+        m_currentUser = loginmsg.user();
+        
+        // 用户的好友列表
+        auto *users =  loginmsg.mutable_friendlist();
+        for (int i = 0; i < users->size(); ++ i)
+        {
+            m_currentUserFriendList.push_back(users->at(i));
+        }
+
+        // 用户的群组列表
+        auto *groups = loginmsg.mutable_grouplist();
+        for (int i = 0; i < groups->size(); ++ i)
+        {
+            m_currentGroupList.push_back(groups->at(i));
+        }
+
+        // 显示当前登录成功用户的基本信息
+        ShowCurrentUserData();
+
+        // 显示当前登录成功用户的离线消息
+        auto *recvmsg = loginmsg.mutable_recvmsg();
+        for (int i = 0; i < recvmsg->size(); ++ i)
+        {
+            std::cout << recvmsg->at(i) << std::endl;
+        }
+
+        isLoginSuccess = true;
+    }
+}
+
+void reg(std::string str)
+{
+    fixbuf::ErrorMsg recv_msg;
+    if (!recv_msg.ParseFromString(str))
+    {
+        std::cerr << "parse failed, context:" << str << std::endl;
+        return;
+    }
+    if (recv_msg.errcode())
+    {
+        std::cout << name << " is already exist, register error!" << std::endl;
+    }
+    else 
+    {
+        fixbuf::User user;
+        if (!user.ParseFromString(recv_msg.errmsg()))
+        {
+            std::cerr << "parse failed, context:" << recv_msg.errmsg() << std::endl;
+        }
+        else 
+        {
+            std::cout << name << " register success, userid is " << user.id() << ", do not forget it!" << std::endl;
         }
     }
-    cout << "----------------------group list----------------------------" << endl;
-    if (!g_currentUserGroupList.empty())
+}
+
+// 显示当前登录成功用户的基本信息
+void ShowCurrentUserData()
+{
+    std::cout << "===========================login user===========================" << std::endl;
+    std::cout << "id : " << m_currentUser.id() << std::endl;
+    std::cout << "name : " << m_currentUser.name() << std::endl;
+    std::cout << std::endl;
+    std::cout << "---------------------------friend list--------------------------" << std::endl;
+    for (auto user : m_currentUserFriendList)
     {
-        for (Group &group : g_currentUserGroupList)
+        std::cout << user.id() << "         " << user.name() << std::endl;
+    }
+    std::cout << std::endl;
+    std::cout << "---------------------------group list---------------------------" << std::endl;
+    for (auto &group : m_currentGroupList)
+    {
+        std::cout << group.id() << "    " << group.name() << "      " << group.desc() << std::endl;
+        auto *users = group.mutable_groupusers();
+        for (int i = 0; i < users->size(); ++ i)
         {
-            cout << group.getId() << "      " << group.getName() << "       " << group.getDesc() << endl;
-            for (GroupUser &user : group.getUser())
-            {
-                cout << "   " << user.getId() << "  " << user.getName() << "    " << user.getState() << "   " << user.getRole() << endl;
-            }
+            std::cout << "      " << users->at(i).user().id() << "      " << users->at(i).user().name() << "      " << (users->at(i).user().state()?"online":"offline") << "      " << users->at(i).role() << std::endl;
         }
     }
-    cout << "============================================================" << endl;
+    std::cout << std::endl;
+    std::cout << "================================================================" << std::endl;
+    std::cout << std::endl;
 }
 
 // 接收线程
-void readTaskHandler(int fd)
+void ReadTaskHandler(int fd)
 {
     while (1)
     {
@@ -343,249 +674,364 @@ void readTaskHandler(int fd)
             close(fd);
             exit(-1);
         }
+        fixbuf::Info info;
+        if (!info.ParseFromString(buf))
+        {
+            std::cerr << "parse error, context:" << buf << std::endl;
+            exit(-1);
+        }
+        if (info.type() == fixbuf::REGISTER_MSG_ACK)
+        {
+            // 注册的响应消息
+            reg(info.info());
+            sem_post(&m_sem);
+        }
+        else if (info.type() == fixbuf::ADD_FRIEND_MSG_ACK) 
+        {
+            // 添加好友的响应消息
+            fixbuf::ErrorMsg errmsg;
+            if (!errmsg.ParseFromString(info.info()))
+            {
+                std::cerr << "parse error, context:" << info.info() << std::endl;
+                exit(-1);
+            }
+            if (errmsg.errcode())
+            {
+                // 添加好友失败
+                std::cerr << errmsg.errmsg() << std::endl;
+            }
+            else 
+            {
+                std::cout << "Added friend successfully, come and chat with him" << std::endl;
+            }
+        }
+        else if (info.type() == fixbuf::ADD_GROUP_MSG_ACK)
+        {
+            // 加入群组的响应消息
+            fixbuf::ErrorMsg errmsg;
+            if (!errmsg.ParseFromString(info.info()))
+            {
+                std::cerr << "parse error, context:" << info.info() << std::endl;
+                exit(-1);
+            }
+            if (errmsg.errcode())
+            {
+                // 添加好友失败
+                std::cerr << errmsg.errmsg() << std::endl;
+            }
+            else 
+            {
+                std::cout << errmsg.errmsg() << std::endl;
+            }
+        }
+        else if (info.type() == fixbuf::CREATE_GROUP_MSG_ACK)
+        {
+            // 创建群组的响应消息
+            fixbuf::ErrorMsg errmsg;
+            if (!errmsg.ParseFromString(info.info()))
+            {
+                std::cerr << "parse error, context:" << info.info() << std::endl;
+                exit(-1);
+            }
+            if (errmsg.errcode())
+            {
+                // 创建群组失败
+                std::cerr << "The group name you want to create already exists, please create a new group" << std::endl;
+            }
+            else 
+            {
+                int id = atoi(errmsg.errmsg().c_str());
+                std::cout << "group create success, groupid is " << id << std::endl;
+            }
+        }
+        else if (info.type() == fixbuf::LOGIN_MSG_ACK)
+        {
+            // 登录成功的响应消息
+            login(info.info());
+            sem_post(&m_sem);
+        }
+        else if (info.type() == fixbuf::ONE_CHAT)
+        {
+            // 一对一聊天的响应消息
+            fixbuf::FromMsg recvmsg;
+            if (!recvmsg.ParseFromString(info.info()))
+            {
+                std::cerr << "parse error, context:" << info.info() << std::endl;
+                exit(-1);
+            }
+            std::cout << recvmsg.sendtime() << " [" << recvmsg.fromid() << "]" << recvmsg.fromname() << " said: " << recvmsg.msg() << std::endl;
+        }
+        else if (info.type() == fixbuf::GROUP_CHAT)
+        {
+            // 群聊的响应消息
+            fixbuf::GroupMsg groupmsg;
+            if (!groupmsg.ParseFromString(info.info()))
+            {
+                std::cerr << "parse error, context:" << info.info() << std::endl;
+                exit(-1);
+            }
+            std::cout << "群消息[" << groupmsg.groupid() << "] " << groupmsg.sendtime() << " [" << groupmsg.userid() << "] " << groupmsg.username() << " said: " << groupmsg.msg() << std::endl;
+        }
+        else if (info.type() == fixbuf::LIST_MSG_ACK)
+        {
+            // 查看网盘文件的响应消息
+            fixbuf::FileList filelist;
+            if (!filelist.ParseFromString(info.info()))
+            {
+                std::cerr << "parse error, context:" << info.info() << std::endl;
+                exit(-1);
+            }
+            std::cout << "file list : " << std::endl;
+            for (int i = 0; i < filelist.mutable_filelist()->size(); ++ i)
+            {
+                std::cout << filelist.mutable_filelist()->at(i) << " ";
+            }
+            std::cout << std::endl;
+        }
+        else if (info.type() == fixbuf::DELETEFILE_MSG_ACK)
+        {
+            // 删除网盘中文件的响应消息
+            fixbuf::ErrorMsg errmsg;
+            if (!errmsg.ParseFromString(info.info()))
+            {
+                std::cerr << "parse error, context:" << info.info() << std::endl;
+                exit(-1);
+            }
+            if (errmsg.errcode())
+            {
+                std::cerr << errmsg.errmsg() << std::endl;
+            }
+            else 
+            {
+                std::cout << errmsg.errmsg() << std::endl;
+            }
+        }
+        else if (info.type() == fixbuf::UPLOAD_MSG_ACK)
+        {
+            // 上传网盘文件的响应消息
+            fixbuf::FileTrans filetrans;
+            if (!filetrans.ParseFromString(info.info()))
+            {
+                std::cerr << "parse error, context:" << info.info() << std::endl;
+                exit(-1);
+            }
 
-        // 接收ChatServer转发的数据，反序列化生成json数据对象
-        json js = json::parse(buf);
-        int msgtype = js["msgid"].get<int>();
-        if (msgtype == ONE_CHAT_MSG)
-        {
-            cout << js["time"].get<string>() << " [" << js["id"].get<int>() << "] " << js["name"].get<string>() << " said: " << js["msg"].get<string>() << endl;
-            continue;
-        }
-        if (msgtype == GROUP_CHAT_MSG)
-        {
-            cout << "群消息[" << js["groupid"].get<int>() << "] " << js["time"].get<string>() << " [" << js["id"].get<int>() << "] " << js["name"].get<string>() << " said: " << js["msg"].get<string>() << endl;
-            continue;
-        }
-        if (msgtype == CREATE_GROUP_MSG_ACK)
-        {
-            if (js["errno"].get<int>() == 0)
+            // 获取文件传输服务器的IP和端口
+            std::string ip = filetrans.ip();
+            int port = filetrans.port();
+            std::string filename = filetrans.filename();
+
+            // 和文件传输服务器建立连接
+            int sock_fd = socket(AF_INET, SOCK_STREAM, 0);
+            assert(sock_fd != -1);
+            struct sockaddr_in address;
+            address.sin_family = AF_INET;
+            address.sin_port = htons(port);
+            address.sin_addr.s_addr = inet_addr(ip.c_str());
+            int ret = connect(sock_fd, (struct sockaddr*)&address, sizeof(address));
+            assert(ret != -1);
+
+            int newfd = open(filename.c_str(), O_RDONLY);
+            if (newfd == -1)
             {
-                cout << "创建的群组号为：" << js["groupid"].get<int>() << "，不要忘记它!" << endl;
+                std::cerr << "The uploaded file does not exist, please re-upload the existing file" << std::endl;
+                close(sock_fd);
+                continue;
             }
-            else
+
+            // 发送消息表示发送文件
+            char flag = 1;
+            ret = send(sock_fd, &flag, sizeof(flag), 0);
+            assert(ret != -1);
+
+            // 发送用户名
+            int userNameLen = m_currentUser.name().size();
+            int len = send(sock_fd, &userNameLen, sizeof(userNameLen), 0);
+            assert(len != -1);
+            len = send(sock_fd, m_currentUser.name().c_str(), userNameLen, 0);
+            assert(len != -1);
+
+            // 发送文件名
+            int idx = filename.find_last_of('/');
+            std::string sendFileName;
+            if (idx == -1)
             {
-                cout << "群组创建失败!" << endl;
+                sendFileName = filename;
             }
-            continue;
+            else 
+            {
+                sendFileName = filename.substr(idx + 1);
+            }
+            int fileNameLen = sendFileName.size();
+            len = send(sock_fd, &fileNameLen, sizeof(fileNameLen), 0);
+            assert(len != -1);
+            len = send(sock_fd, sendFileName.c_str(), sendFileName.size(), 0);
+            assert(len != -1);
+
+            // 发送文件长度
+            struct stat fileStat;
+            stat(filename.c_str(), &fileStat);
+            len = send(sock_fd, &fileStat.st_size, sizeof(fileStat.st_size), 0);
+            assert(len != -1);
+
+            // 发送文件内容
+            void *p = mmap(nullptr, fileStat.st_size, PROT_READ, MAP_SHARED, newfd, 0);
+            assert(p != (void*)-1);
+            ret = SendN(sock_fd, p, fileStat.st_size);
+            assert(ret != -1);
+            munmap(p, fileStat.st_size);
+            printf("上传完成\n");
+            close(sock_fd);
+            close(newfd);
+        }
+        else if (info.type() == fixbuf::DOWNLOAD_MSG_ACK) 
+        {
+            // 下载网盘文件响应消息
+            fixbuf::FileTrans filetrans;
+            if (!filetrans.ParseFromString(info.info()))
+            {
+                std::cerr << "parse error, context:" << info.info() << std::endl;
+                exit(-1);
+            }
+
+            // 获取文件传输服务器的IP和端口
+            std::string ip = filetrans.ip();
+            int port = filetrans.port();
+            std::string filename = filetrans.filename();
+            std::string newfilename = filetrans.newfilename();
+
+            // 和文件传输服务器建立连接
+            int sock_fd = socket(AF_INET, SOCK_STREAM, 0);
+            assert(sock_fd != -1);
+            struct sockaddr_in address;
+            address.sin_family = AF_INET;
+            address.sin_port = htons(port);
+            address.sin_addr.s_addr = inet_addr(ip.c_str());
+            int ret = connect(sock_fd, (struct sockaddr*)&address, sizeof(address));
+            assert(ret != -1);
+
+            char cwd[64] = {0};
+            getcwd(cwd, 64);
+            std::string filecwd = std::string(cwd) + "/" + newfilename;
+            int newfd = open(filecwd.c_str(), O_CREAT | O_RDWR, 0666);
+            assert(newfd != -1);
+
+            // 发送消息表示接收文件
+            char flag = 2;
+            ret = send(sock_fd, &flag, sizeof(flag), 0);
+            assert(ret != -1);
+
+            // 发送用户名
+            int userNameLen = m_currentUser.name().size();
+            int len = send(sock_fd, &userNameLen, sizeof(userNameLen), 0);
+            assert(len != -1);
+            len = send(sock_fd, m_currentUser.name().c_str(), userNameLen, 0);
+            assert(len != -1);
+
+            // 发送请求下载的文件名
+            int fileLen = filename.size();
+            len = send(sock_fd, &fileLen, sizeof(fileLen), 0);
+            assert(len != -1);
+            len = send(sock_fd, filename.c_str(), fileLen, 0);
+            assert(len != -1);
+
+            // 接收文件的长度
+            off_t fileTotalLen;
+            len = recv(sock_fd, &fileTotalLen, sizeof(fileTotalLen), 0);
+            assert(len != -1);
+
+            ret = ftruncate(newfd, fileTotalLen);
+            assert(ret != -1);
+            void *p = mmap(nullptr, fileTotalLen, PROT_READ | PROT_WRITE, MAP_SHARED, newfd, 0);
+            assert(p != (void*)-1);
+            ret = RecvN(sock_fd, p, fileTotalLen);
+            assert(ret != -1);
+
+            printf("下载完成\n");
+            close(sock_fd);
+            close(newfd);
         }
     }
 }
 
-// 主聊天页面
-void mainMenu(int fd)
+// 获取系统时间（聊天信息需添加时间信息）
+std::string GetCurrentTime()
+{
+    auto tt = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+    struct tm *ptm = localtime(&tt);
+    char data[60] = {0};
+    sprintf(data, "%d-%02d-%02d %02d:%02d:%02d", (int)ptm->tm_year + 1900, (int)ptm->tm_mon + 1, (int)ptm->tm_mday, (int)ptm->tm_hour, (int)ptm->tm_min, (int)ptm->tm_sec);
+    return std::string(data);
+}
+
+// 聊天页面程序
+void MainMenu(int fd)
 {
     help();
 
     char buf[1024] = {0};
     while (isMainMenuing)
     {
-        cin.getline(buf, 1024);
-        string commandBuf(buf);
-        string command;
-        int idx = commandBuf.find(":");
+        std::cin.getline(buf, 1024);
+        std::string command_buf(buf);
+        std::string command;
+        int idx = command_buf.find(':');
         if (idx == -1)
         {
-            command = commandBuf;
+            command = command_buf;
         }
-        else
+        else 
         {
-            command = commandBuf.substr(0, idx);
-            commandBuf = commandBuf.substr(idx + 1);
+            command = command_buf.substr(0, idx);
+            command_buf = command_buf.substr(idx + 1);
         }
 
         auto it = commandMap.find(command);
         if (it == commandMap.end())
         {
-            cerr << "invaild input command!" << endl;
+            std::cerr << "invaild input command!" << std::endl;
             continue;
         }
-        commandHandlerMap[command](fd, commandBuf);
+        commandHandlerMap[command](fd, command_buf);
     }
 }
 
-void help(int fd, string str)
+int SendN(int fd, void *buf, off_t bufLen)
 {
-    cout << "show command list" << endl;
-    for (auto it : commandMap)
+    char *p = (char*)buf;
+    off_t total = 0, sendLen = 0, lastLen = 0;
+    int ret;
+    while (total < bufLen)
     {
-        cout << it.first << "  :  " << it.second << endl;
-    }
-    cout << endl;
-}
-
-// friendid:msg
-void chat(int fd, string str)
-{
-    int idx = str.find(':');
-    if (idx == -1)
-    {
-        cerr << "chat command invalid!" << endl;
-        return;
-    }
-    int id = atoi(str.substr(0, idx).c_str());
-    string msg = str.substr(idx + 1);
-
-    json js;
-    js["msgid"] = ONE_CHAT_MSG;
-    js["id"] = g_currentUser.getId();
-    js["name"] = g_currentUser.getName();
-    js["time"] = getCurrentTime();
-    js["to"] = id;
-    js["msg"] = msg;
-    string buffer = js.dump();
-
-    int len = send(fd, buffer.c_str(), strlen(buffer.c_str()) + 1, 0);
-    if (len == -1)
-    {
-        cerr << "send chat msg error -> " << buffer << endl;
-    }
-}
-
-// friendid
-void addfriend(int fd, string str)
-{
-    int friendid = atoi(str.c_str());
-    json js;
-    js["msgid"] = ADD_FRIEND_MSG;
-    js["id"] = g_currentUser.getId();
-    js["friendid"] = friendid;
-    string buffer = js.dump();
-    cout << "addfriend  :   " << buffer << endl;
-
-    int len = send(fd, buffer.c_str(), strlen(buffer.c_str()) + 1, 0);
-    if (len == -1)
-    {
-        cerr << "send add friend error -> " << buffer << endl;
-    }
-}
-
-// groupname:groupdesc
-void creategroup(int fd, string str)
-{
-    int idx = str.find(":");
-    if (idx == -1)
-    {
-        cerr << "creategroup command invaild!" << endl;
-        return;
-    }
-    string name = str.substr(0, idx);
-    string desc = str.substr(idx + 1);
-    json js;
-    js["msgid"] = CREATE_GROUP_MSG;
-    js["id"] = g_currentUser.getId();
-    js["groupname"] = name;
-    js["groupdesc"] = desc;
-    string buffer = js.dump();
-
-    int len = send(fd, buffer.c_str(), strlen(buffer.c_str()) + 1, 0);
-    if (len == -1)
-    {
-        cerr << "send create group error -> " << buffer << endl;
-    }
-}
-
-// groupid
-void addgroup(int fd, string str)
-{
-    int id = atoi(str.c_str());
-    json js;
-    js["msgid"] = ADD_GROUP_MSG;
-    js["id"] = g_currentUser.getId();
-    js["groupid"] = id;
-    string buffer = js.dump();
-    cout << "addgroup  :   " << buffer << endl;
-
-    int len = send(fd, buffer.c_str(), strlen(buffer.c_str()) + 1, 0);
-    if (len == -1)
-    {
-        cerr << "send add group error -> " << buffer << endl;
-    }
-}
-
-// groupid:msg
-void groupchat(int fd, string str)
-{
-    int idx = str.find(':');
-    if (idx == -1)
-    {
-        cerr << "groupchat command invaild" << endl;
-        return;
-    }
-
-    int groupid = atoi(str.substr(0, idx).c_str());
-    string msg = str.substr(idx + 1);
-    json js;
-    js["msgid"] = GROUP_CHAT_MSG;
-    js["id"] = g_currentUser.getId();
-    js["name"] = g_currentUser.getName();
-    js["time"] = getCurrentTime();
-    js["groupid"] = groupid;
-    js["msg"] = msg;
-    string buffer = js.dump();
-
-    int len = send(fd, buffer.c_str(), strlen(buffer.c_str()) + 1, 0);
-    if (len == -1)
-    {
-        cerr << "send group chat error -> " << buffer << endl;
-    }
-}
-
-void loginout(int fd, string str)
-{
-    json js;
-    js["msgid"] = LOGINOUT_MSG;
-    js["id"] = g_currentUser.getId();
-    string buffer = js.dump();
-
-    int len = send(fd, buffer.c_str(), strlen(buffer.c_str()) + 1, 0);
-    if (len == -1)
-    {
-        cerr << "send loginout error -> " << buffer << endl;
-    }
-    else
-    {
-        isMainMenuing = false;
-    }
-}
-
-/*
-不是实时更新的，只是登录时的状态，后面看看能不能可以实现实时更新
-*/
-void friendlist(int fd, string str)
-{
-    cout << "friendlist" << endl;
-    for (auto &user : g_currentUserFriendList)
-    {
-        cout << user.getId() << " " << user.getName() << " " << user.getState() << endl;
-    }
-    cout << endl;
-}
-
-/*
-不是实时更新的，只是登录时的状态，后面看看能不能可以实现实时更新
-*/
-void grouplist(int fd, string str)
-{
-    cout << "groulist" << endl;
-    for (auto &group : g_currentUserGroupList)
-    {
-        cout << group.getId() << " " << group.getName() << " " << group.getDesc() << endl;
-        for (auto &user : group.getUser())
+        ret = send(fd, p + total, bufLen - total, 0);
+        if (ret == -1)  return -1;
+        total += ret;
+        sendLen += ret;
+        if (sendLen - lastLen > bufLen / 10000)
         {
-            cout << user.getId() << " " << user.getName() << " " << user.getState() << " " << user.getRole() << endl;
+            lastLen = sendLen;
+            printf("%6.2f%%\r", (double)sendLen * 100 / bufLen);
         }
-        cout << endl;
     }
-    cout << endl;
+    return 0;
 }
 
-// 获取系统时间
-string getCurrentTime()
+int RecvN(int fd, void *buf, off_t bufLen)
 {
-    auto tt = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-    struct tm *ptm = localtime(&tt);
-    char data[60] = {0};
-    sprintf(data, "%d-%02d-%02d %02d:%02d:%02d", (int)ptm->tm_year + 1900, (int)ptm->tm_mon + 1, (int)ptm->tm_yday, (int)ptm->tm_hour, (int)ptm->tm_min, (int)ptm->tm_sec);
-    return std::string(data);
+    char *p = (char*)buf;
+    off_t total = 0, recvLen = 0, lastLen = 0;
+    int ret;
+    while (total < bufLen)
+    {
+        ret = recv(fd, p + total, bufLen - total, 0);
+        if (ret == -1) return -1;
+        total += ret;
+        recvLen += ret;
+        if (recvLen - lastLen > bufLen / 10000)
+        {
+            lastLen = recvLen;
+            printf("%6.2f%%\r", (double)recvLen * 100 / bufLen);
+        }
+    }
+    return 0;
 }

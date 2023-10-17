@@ -1,32 +1,38 @@
-#include "chatserver.hpp"
-#include "chatservice.hpp"
-#include <iostream>
+#include "ChatServer.hpp"
+#include "FileServer.hpp"
 #include <signal.h>
+#include <thread>
 
-// 服务器ctrl c异常结束后，重置user的状态信息
-void sigHandle(int)
+void SigHandle(int)
 {
-    Chatservice::instance()->reset();
+    ChatService::GetInstance()->Reset();
     exit(0);
 }
 
-int main(int argc, char* argv[])
+void fileServer(std::string ip, int port)
 {
-    if (argc != 3)
+    FileServer::GetInstance()->Init(ip, port);
+    FileServer::GetInstance()->Start();
+}
+
+int main(int argc, char** argv)
+{
+    if (argc < 4)
     {
-        cerr << "input invaild, example ./CHatServer 127.0.0.1 6000" << endl;
-        exit(0);
+        std::cerr << "format:./ChatServer IP SERVERPORT FILEPORT" << std::endl;
+        exit(-1);
     }
 
-    string ip = argv[1];
-    int port = atoi(argv[2]);
+    std::string ip = argv[1];
+    int serverPort = atoi(argv[2]);
+    int filePort = atoi(argv[3]);
 
-    signal(SIGINT, sigHandle);
+    signal(SIGINT, SigHandle);
 
-    EventLoop loop;
-    InetAddress addr(ip, port);
-    ChatServer server(&loop, addr, "ChatServe");
-
+    std::thread m_fileServer(fileServer, ip, filePort);
+    muduo::net::EventLoop loop;
+    muduo::net::InetAddress address(ip, serverPort);
+    ChatServer server(&loop, address, "ChatServer");
     server.start();
     loop.loop();
 
